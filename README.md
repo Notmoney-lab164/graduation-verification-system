@@ -9,6 +9,8 @@ Mô tả công việc:
 vào hệ thống lưu trữ của Blockchain
 - Phát triển giao diện web hoặc API cho phép người dùng nhập URL và nhận kết
 quả xác thực.
+
+
 Yêu cầu:
 - Có kiến thức về Lập trình Python (phục vụ AI) và tư duy về hệ thống phân tán
 (Blockchain)
