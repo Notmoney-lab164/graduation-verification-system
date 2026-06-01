@@ -162,6 +162,9 @@ Kết quả mong đợi:
 
 ## API
 
+cd ~/graduation-verification-system/frontend
+npm run dev
+
 ```txt
 GET /api/students/{studentId}/verify
 ```

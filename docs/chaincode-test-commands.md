@@ -150,7 +150,7 @@ Chaincode invoke successful
 peer chaincode query \
 -C mychannel \
 -n graduation \
--c '{"Args":["queryStudent","SV005"]}'
+-c '{"Args":["queryStudent","SV005"]}' | jq
 Kết quả đúng sẽ có dạng:
 
 {
@@ -269,3 +269,31 @@ Fabric Private Data Collections.
 Chữ ký số thật bằng private key của trường.
 Backend xác thực người dùng.
 HTTPS và phân quyền admin.
+
+
+
+## Ngày 5 - Backend API gọi Fabric
+
+### Chạy backend
+
+```bash
+cd ~/graduation-verification-system/backend
+source venv/bin/activate
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+### Test API home
+curl http://localhost:8000/
+
+### Test sinh viên hợp lệ về mặt định dạng
+curl http://localhost:8000/api/students/SE182026
+
+### Test sinh viên không tồn tại
+curl http://localhost:8000/api/students/ZZ999999
+
+### Test mã sinh viên sai định dạng
+curl 'http://localhost:8000/api/students/!@#$%**(('
+
+### Kết quả mong đợi
+Mã đúng format nhưng chưa có dữ liệu: STUDENT_NOT_FOUND
+Mã sai format: INVALID_STUDENT_ID
+Có dữ liệu trên blockchain: success: true

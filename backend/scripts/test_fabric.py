@@ -65,8 +65,22 @@ if __name__ == "__main__":
         main()
     except RuntimeError as e:
         msg = str(e).strip()
+
         if "STUDENT_NOT_FOUND" in msg or "does not exist" in msg:
-            print(f"\nNOT_FOUND: {msg}")
+            print("STUDENT_NOT_FOUND")
             raise SystemExit(2)
-        print(f"\nERROR: {msg}")
+
+        if "STUDENT_ALREADY_EXISTS" in msg:
+            print("STUDENT_ALREADY_EXISTS")
+            raise SystemExit(2)
+
+        if "INVALID_INPUT" in msg:
+            print("INVALID_INPUT")
+            raise SystemExit(2)
+
+        if "UNAUTHORIZED_ORGANIZATION" in msg:
+            print("UNAUTHORIZED_ORGANIZATION")
+            raise SystemExit(2)
+
+        print("ERROR")
         raise SystemExit(1)
