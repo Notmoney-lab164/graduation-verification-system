@@ -186,7 +186,7 @@ def admin_delete_student(
 
     logger.info("Student %s deleted by %s", student_id, current_admin.username)
 
-    return {"message": "Student deleted"}
+    return {"message": "Student deleted"}       
 
 @app.post(
     "/api/admin/students/{student_id}/sync-blockchain",
