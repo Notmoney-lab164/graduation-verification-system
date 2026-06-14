@@ -23,8 +23,11 @@ import org.hyperledger.fabric.shim.ledger.QueryResultsIterator;
 @Default
 public final class GraduationContract implements ContractInterface {
 
-    private static final String AUTHORIZED_ISSUER_MSP = "Org1MSP";
+   // MSP ID cua to chuc trong Hyperledger Fabric.
+   // Day la dinh danh ky thuat cua Fabric, khong phai ten truong.
+   // Neu dung fabric-samples/test-network thi Org1MSP la mac dinh cua Org1. 
 
+    private static final String AUTHORIZED_ISSUER_MSP = "Org1MSP";  
     private static final Set<String> VALID_GRADUATION_STATUS = Set.of(
             "GRADUATED",
             "NOT_GRADUATED",
