@@ -1,299 +1,307 @@
-# Chaincode Test Commands
+# Hướng dẫn test Hyperledger Fabric Chaincode
 
-## 1. Mục Đích
+## 1. Mục đích
 
-Tài liệu này hướng dẫn cách chạy Hyperledger Fabric test-network, deploy Java chaincode `graduation`, và test các hàm chính:
+Tài liệu này hướng dẫn chạy và kiểm tra Java chaincode `graduation` của hệ thống xác minh tốt nghiệp.
 
-- `createStudent`
-- `queryStudent`
-- `verifyGraduation`
-- `verifyStudentIntegrity`
+```text
+React Frontend
+  -> FastAPI Backend
+  -> MySQL lưu hồ sơ sinh viên đầy đủ
+  -> Hyperledger Fabric lưu mã hash xác minh
+```
 
-Hệ thống dùng cho đề tài:
+Hash xác minh hiện được tạo từ ba trường:
 
-```txt
-Blockchain-based Student Graduation Verification System using Hyperledger Fabric
-## 2. Cấu Trúc Project
-Project chính nằm tại:
+```text
+student_id + gpa + graduation_status
+```
 
-~/graduation-verification-system
-Cấu trúc chính:
+## 2. Cấu hình Fabric
 
-graduation-verification-system/
-├── frontend/
-├── backend/
-├── chaincode/
-│   └── graduation-java/
-├── docs/
-└── README.md
-Chaincode Java nằm tại:
+| Nội dung | Giá trị |
+|---|---|
+| Channel | `mychannel` |
+| Chaincode | `graduation` |
+| Peer Org1 | `localhost:7051` |
+| Peer Org2 | `localhost:9051` |
+| Orderer | `localhost:7050` |
 
-~/graduation-verification-system/chaincode/graduation-java
-## 3. Vào Thư Mục Test Network
-Tùy máy, fabric-samples có thể nằm ở một trong hai đường dẫn sau.
+Đường dẫn dự án:
 
-Máy hiện tại:
+```text
+Project: ~/graduation-verification-system
+Java chaincode: ~/graduation-verification-system/chaincode/graduation-java
+Fabric test-network: ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
+```
 
-cd ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
-Máy khác có thể là:
+## 3. Kiểm tra Fabric đang chạy
 
-cd ~/fabric-samples/test-network
-Kiểm tra đúng thư mục bằng lệnh:
-
-ls
-Nếu đúng, phải thấy file:
-
-network.sh
-4. Chạy Fabric Test Network
-Chạy network và tạo channel:
-
-./network.sh up createChannel
-Kết quả đúng:
-
-Channel 'mychannel' joined
-Kiểm tra container:
-
+```bash
 docker ps
-Phải thấy các container đang Up:
+```
 
+Kết quả cần có:
+
+```text
 peer0.org1.example.com
 peer0.org2.example.com
 orderer.example.com
-Nếu báo:
+couchdb0
+couchdb1
+```
 
-channel already exists
-thì channel đã có rồi, không cần chạy lại up createChannel.
+## 4. Bật lại network cũ sau khi tắt máy
 
-5. Build Java Chaincode
-Vào thư mục chaincode:
+Nếu muốn giữ ledger và dữ liệu Fabric cũ, không chạy `network.sh down` hoặc `network.sh up createChannel` ngay.
 
-cd ~/graduation-verification-system/chaincode/graduation-java
-Build:
-
-./gradlew installDist
-Nếu bị lỗi test coverage hoặc checkstyle, dùng:
-
-./gradlew installDist -x test -x jacocoTestCoverageVerification -x checkstyleMain -x checkstyleTest
-Kết quả đúng:
-
-BUILD SUCCESSFUL
-6. Deploy Chaincode
-Quay lại test-network:
-
-cd ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
-Hoặc nếu máy dùng đường dẫn khác:
-
-cd ~/fabric-samples/test-network
-Deploy lần đầu trên network mới:
-
-./network.sh deployCC -ccn graduation \
--ccp ~/graduation-verification-system/chaincode/graduation-java \
--ccl java \
--ccs 1
-Kết quả đúng:
-
-Chaincode definition committed on channel 'mychannel'
-Chaincode initialization is not required
-Nếu chaincode đã deploy trước đó và Fabric báo cần sequence mới, tăng -ccs.
-
-Ví dụ:
-
-./network.sh deployCC -ccn graduation \
--ccp ~/graduation-verification-system/chaincode/graduation-java \
--ccl java \
--ccs 2
-Lưu ý:
-
-Network mới sạch  -> sequence 1
-Cập nhật lần sau  -> sequence 2, 3, 4...
-Nếu gặp lỗi:
-
-requested sequence 5 is larger than the next available sequence number 1
-thì nghĩa là network hiện tại còn mới, phải dùng:
-
--ccs 1
-7. Set Môi Trường Org1
-Trước khi chạy peer chaincode invoke hoặc peer chaincode query, cần đứng trong thư mục test-network.
-
-cd ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
-Hoặc:
-
-cd ~/fabric-samples/test-network
-Set biến môi trường:
-
-export PATH=${PWD}/../bin:$PATH
-export FABRIC_CFG_PATH=$PWD/../config/
-export CORE_PEER_TLS_ENABLED=true
-export CORE_PEER_LOCALMSPID="Org1MSP"
-export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-export CORE_PEER_ADDRESS=localhost:7051
-8. Tạo Sinh Viên
-Lệnh này gọi hàm createStudent.
-
-peer chaincode invoke \
--o localhost:7050 \
---ordererTLSHostnameOverride orderer.example.com \
---tls \
---cafile "${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem" \
--C mychannel \
--n graduation \
---peerAddresses localhost:7051 \
---tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
---peerAddresses localhost:9051 \
---tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
--c '{"function":"createStudent","Args":["SV005","Nguyen Van E","2002-08-15","HASHED_CITIZEN_ID_001","HCMUTE","HCM University of Technology and Education","Faculty of Information Technology","Software Engineering","DEG-2026-0005","Bachelor","GRADUATED","2026-05-26","2026","Good","3.45","150","2022","SIGNATURE_DEMO_001"]}'
-Kết quả đúng:
-
-Chaincode invoke successful
-9. Truy Vấn Sinh Viên
-peer chaincode query \
--C mychannel \
--n graduation \
--c '{"Args":["queryStudent","SV005"]}' | jq
-Kết quả đúng sẽ có dạng:
-
-{
-  "studentId": "SV005",
-  "fullName": "Nguyen Van E",
-  "dateOfBirth": "2002-08-15",
-  "citizenIdHash": "HASHED_CITIZEN_ID_001",
-  "institutionCode": "HCMUTE",
-  "institutionName": "HCM University of Technology and Education",
-  "facultyName": "Faculty of Information Technology",
-  "major": "Software Engineering",
-  "degreeId": "DEG-2026-0005",
-  "degreeType": "Bachelor",
-  "graduationStatus": "GRADUATED",
-  "graduationDate": "2026-05-26",
-  "graduationYear": "2026",
-  "classification": "Good",
-  "gpa": "3.45",
-  "totalCredits": "150",
-  "entranceYear": "2022"
-}
-10. Kiểm Tra Trạng Thái Tốt Nghiệp
-peer chaincode query \
--C mychannel \
--n graduation \
--c '{"Args":["verifyGraduation","SV005"]}'
-Kết quả đúng:
-
-GRADUATED
-11. Kiểm Tra Toàn Vẹn Dữ Liệu
-peer chaincode query \
--C mychannel \
--n graduation \
--c '{"Args":["verifyStudentIntegrity","SV005"]}'
-Kết quả đúng:
-
-true
-12. Các Lỗi Thường Gặp
-Lỗi 1: channel already exists
-channel already exists
-ledger [mychannel] already exists
-Nguyên nhân:
-
-Channel mychannel đã được tạo trước đó.
-Cách xử lý:
-
-Không chạy lại ./network.sh up createChannel nữa.
-Deploy chaincode trực tiếp.
-Lỗi 2: connect refused localhost:7051
-connect: connection refused localhost:7051
-Nguyên nhân:
-
-peer0.org1.example.com chưa chạy hoặc network chưa up.
-Cách kiểm tra:
-
-docker ps
-Nếu không thấy peer/orderer, chạy lại:
-
-./network.sh up createChannel
-Lỗi 3: Config File "core" Not Found
-Config File "core" Not Found
-Nguyên nhân:
-
-Đang chạy lệnh peer ở sai thư mục hoặc chưa set FABRIC_CFG_PATH.
-Cách xử lý:
-
-cd ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
-export FABRIC_CFG_PATH=$PWD/../config/
-Lỗi 4: crypto path does not exist
-the supplied identity is not valid
-crypto path does not exist
-Nguyên nhân:
-
-Chưa set CORE_PEER_MSPCONFIGPATH hoặc đang đứng sai thư mục.
-Cách xử lý:
-
-Quay lại mục 7 và set lại môi trường Org1.
-Lỗi 5: requested sequence is larger
-requested sequence 5 is larger than the next available sequence number 1
-Nguyên nhân:
-
-Network hiện tại chưa từng deploy chaincode, nên sequence đúng là 1.
-Cách xử lý:
-
-./network.sh deployCC -ccn graduation \
--ccp ~/graduation-verification-system/chaincode/graduation-java \
--ccl java \
--ccs 1
-Lỗi 6: requested sequence must be sequence X
-Nguyên nhân:
-
-Chaincode đã deploy rồi, cần tăng sequence.
-Cách xử lý:
-
-Dùng đúng sequence Fabric yêu cầu.
-Ví dụ nếu Fabric báo phải là sequence 2 thì dùng -ccs 2.
-13. Dừng Network
-./network.sh down
-Nếu cần xóa ledger cũ để reset sạch:
-
-docker volume rm compose_orderer.example.com compose_peer0.org1.example.com compose_peer0.org2.example.com
-Lưu ý: chỉ xóa volume khi muốn reset sạch dữ liệu blockchain local.
-
-14. Ghi Chú Bảo Mật
-Chaincode hiện tại đã cải thiện bảo mật ở mức demo:
-
-Không lưu CCCD gốc, chỉ lưu citizenIdHash.
-Có metadataHash để kiểm tra toàn vẹn dữ liệu.
-Có issuerSignature để mô phỏng chữ ký số của đơn vị cấp bằng.
-Có organizationMsp để ghi nhận tổ chức tạo bản ghi.
-Có ledgerTimestamp để ghi nhận thời điểm giao dịch.
-Hàm ghi dữ liệu chỉ cho phép MSP được cấu hình, ví dụ Org1MSP.
-Trong môi trường thật nên bổ sung:
-
-Fabric Private Data Collections.
-Chữ ký số thật bằng private key của trường.
-Backend xác thực người dùng.
-HTTPS và phân quyền admin.
-
-
-
-## Ngày 5 - Backend API gọi Fabric
-
-### Chạy backend
+Chạy:
 
 ```bash
-cd ~/graduation-verification-system/backend
-source venv/bin/activate
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+docker start \
+  orderer.example.com \
+  couchdb0 \
+  couchdb1 \
+  peer0.org1.example.com \
+  peer0.org2.example.com
+```
 
-### Test API home
-curl http://localhost:8000/
+Sau đó kiểm tra lại:
 
-### Test sinh viên hợp lệ về mặt định dạng
-curl http://localhost:8000/api/students/SE182026
+```bash
+docker ps
+```
 
-### Test sinh viên không tồn tại
-curl http://localhost:8000/api/students/ZZ999999
+## 5. Tạo network mới
 
-### Test mã sinh viên sai định dạng
-curl 'http://localhost:8000/api/students/!@#$%**(('
+Chỉ dùng khi muốn reset toàn bộ Fabric local.
 
-### Kết quả mong đợi
-Mã đúng format nhưng chưa có dữ liệu: STUDENT_NOT_FOUND
-Mã sai format: INVALID_STUDENT_ID
-Có dữ liệu trên blockchain: success: true
+```bash
+cd ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
+./network.sh up createChannel -s couchdb
+```
+
+Kết quả đúng:
+
+```text
+Channel 'mychannel' joined
+```
+
+## 6. Build Java chaincode
+
+```bash
+cd ~/graduation-verification-system/chaincode/graduation-java
+./gradlew build
+```
+
+Kết quả đúng:
+
+```text
+BUILD SUCCESSFUL
+```
+
+Lệnh này kiểm tra lỗi Java, compile chaincode và chạy test nếu có. Nó chưa deploy chaincode và chưa ghi dữ liệu vào Blockchain.
+
+## 7. Deploy chaincode trên network mới
+
+```bash
+cd ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
+
+./network.sh deployCC \
+  -ccn graduation \
+  -ccp ~/graduation-verification-system/chaincode/graduation-java \
+  -ccl java \
+  -ccv 1.0 \
+  -ccs 1
+```
+
+Kết quả đúng:
+
+```text
+Chaincode definition committed on channel 'mychannel'
+Query chaincode definition successful on peer0.org1
+Query chaincode definition successful on peer0.org2
+```
+
+Network mới dùng `-ccs 1`. Khi sửa chaincode và deploy lại trên cùng network, tăng version và sequence, ví dụ `-ccv 2.0 -ccs 2`.
+
+## 8. Thiết lập môi trường Fabric CLI
+
+```bash
+cd ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
+
+export PATH=${PWD}/../bin:$PATH
+export FABRIC_CFG_PATH=${PWD}/../config/
+
+source ./scripts/envVar.sh
+setGlobals 1
+
+export ORDERER_CA=${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
+export PEER0_ORG1_CA=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+export PEER0_ORG2_CA=${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
+```
+
+Kiểm tra MSP đang dùng:
+
+```bash
+echo $CORE_PEER_LOCALMSPID
+```
+
+Kết quả là `Org1MSP`.
+
+## 9. Query: đọc dữ liệu Blockchain
+
+`query` chỉ đọc dữ liệu, không tạo transaction mới và không thay đổi ledger.
+
+Đếm số sinh viên:
+
+```bash
+peer chaincode query -C mychannel -n graduation \
+  -c '{"Args":["countStudents"]}'
+```
+
+Kiểm tra sinh viên có tồn tại không:
+
+```bash
+peer chaincode query -C mychannel -n graduation \
+  -c '{"Args":["studentExists","SVFAB012"]}'
+```
+
+Xem thông tin sinh viên:
+
+```bash
+peer chaincode query -C mychannel -n graduation \
+  -c '{"Args":["queryStudent","SVFAB012"]}' | jq
+```
+
+Kiểm tra trạng thái tốt nghiệp:
+
+```bash
+peer chaincode query -C mychannel -n graduation \
+  -c '{"Args":["verifyGraduation","SVFAB012"]}'
+```
+
+## 10. Invoke: ghi dữ liệu vào Blockchain
+
+`invoke` ghi hoặc thay đổi dữ liệu và tạo transaction mới.
+
+Project này yêu cầu Org1 và Org2 cùng endorse giao dịch. Vì vậy lệnh invoke phải có cả hai peer:
+
+```bash
+peer chaincode invoke \
+  -o localhost:7050 \
+  --ordererTLSHostnameOverride orderer.example.com \
+  --tls \
+  --cafile "$ORDERER_CA" \
+  -C mychannel \
+  -n graduation \
+  --peerAddresses localhost:7051 \
+  --tlsRootCertFiles "$PEER0_ORG1_CA" \
+  --peerAddresses localhost:9051 \
+  --tlsRootCertFiles "$PEER0_ORG2_CA" \
+  --waitForEvent \
+  -c '{"Args":["createStudent","SVFAB020","3.20","GRADUATED"]}'
+```
+
+Kết quả đúng:
+
+```text
+committed with status (VALID) at localhost:7051
+committed with status (VALID) at localhost:9051
+```
+
+Không gọi `createStudent` lại với MSSV đã tồn tại.
+
+## 11. Luồng thật qua FastAPI
+
+Trong hệ thống thật, admin không cần gõ CLI để tạo sinh viên.
+
+```text
+Admin React page
+  -> POST /api/admin/students
+  -> FastAPI lưu hồ sơ vào MySQL
+  -> Backend tạo hash
+  -> Backend invoke Fabric
+  -> Org1 và Org2 endorse
+  -> Fabric commit transaction
+  -> Backend lưu blockchain_tx_id vào MySQL
+```
+
+Khi người dùng xác minh:
+
+```text
+GET /api/verify/{student_id}
+  -> Backend tính hash hiện tại từ MySQL
+  -> Backend query hash trên Fabric
+  -> Trả về Verified hoặc Mismatch
+```
+
+## 12. Test Mismatch
+
+Sửa trực tiếp GPA trong MySQL:
+
+```sql
+UPDATE students
+SET gpa = 1.00
+WHERE student_id = 'SVFAB012';
+```
+
+Gọi lại API:
+
+```text
+GET /api/verify/SVFAB012
+```
+
+Kết quả phải là `Mismatch`.
+
+Khôi phục GPA gốc:
+
+```sql
+UPDATE students
+SET gpa = 3.20
+WHERE student_id = 'SVFAB012';
+```
+
+Verify lại sẽ trả `Verified`.
+
+## 13. Lỗi thường gặp
+
+### channelID is empty
+
+Nguyên nhân: thiếu `-C mychannel`.
+
+```text
+-C = tên channel
+-c = JSON Args của chaincode
+```
+
+### connection refused localhost:7051
+
+Nguyên nhân: peer chưa chạy. Kiểm tra `docker ps` và bật lại container cũ nếu cần.
+
+### ENDORSEMENT_POLICY_FAILURE
+
+Nguyên nhân: invoke chỉ gửi đến Org1, thiếu Org2. Thêm đủ hai `--peerAddresses` và TLS certificate tương ứng.
+
+### STUDENT_ALREADY_EXISTS
+
+Nguyên nhân: MSSV đã tồn tại trên Fabric. Dùng MSSV mới hoặc dùng `queryStudent`.
+
+### Permission denied
+
+Nguyên nhân thường do đã từng chạy Fabric bằng `sudo`.
+
+```bash
+cd ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
+sudo chown -R $USER:$USER organizations channel-artifacts
+```
+
+Sau đó không dùng `sudo` cho `network.sh`.
+
+## 14. Bảo mật
+
+- Không lưu CCCD gốc trên Fabric.
+- Không push `backend/.env` lên GitHub.
+- Chỉ push `backend/.env.example`.
+- Không public `SECRET_KEY`, mật khẩu MySQL, Fabric private key hoặc certificate.
+- Frontend không hiển thị hash thô cho người dùng public.

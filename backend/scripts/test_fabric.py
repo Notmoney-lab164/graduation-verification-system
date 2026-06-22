@@ -1,10 +1,3 @@
-"""
-test_fabric.py — test chaincode graduation
-Usage:
-  python scripts/test_fabric.py           # mặc định SV005
-  python scripts/test_fabric.py SV001
-  python scripts/test_fabric.py exists SV999
-"""
 import json
 import os
 import subprocess
@@ -51,7 +44,7 @@ def main() -> None:
         print(peer_query("studentExists", student_id))
         return
 
-    student_id = sys.argv[1] if len(sys.argv) > 1 else "SV005"
+    student_id = sys.argv[1] if len(sys.argv) > 1 else "SVFAB012"
 
     print("=== queryStudent ===")
     print(peer_query("queryStudent", student_id))

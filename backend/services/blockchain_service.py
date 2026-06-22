@@ -1,4 +1,8 @@
 from dataclasses import dataclass
+from typing import Any
+
+import fabric_client
+from services.hash_service import calculate_student_hash
 
 
 @dataclass
@@ -9,48 +13,52 @@ class BlockchainRecord:
     tx_id: str | None = None
 
 
-_mock_blockchain_storage: dict[str, BlockchainRecord] = {}
-
-
 def sync_student_to_blockchain(student) -> BlockchainRecord:
-    tx_id = f"mock-tx-{student.student_id}"
+    fabric_student = fabric_client.sync_student(student)
 
-    record = BlockchainRecord(
-        student_id=student.student_id,
-        metadata_hash=student.metadata_hash,
-        graduation_status=student.graduation_status,
-        tx_id=tx_id,
+    return BlockchainRecord(
+        student_id=fabric_student.get("studentId", student.student_id),
+        metadata_hash=fabric_student.get("metadataHash", student.metadata_hash),
+        graduation_status=fabric_student.get(
+            "graduationStatus",
+            student.graduation_status,
+        ),
+        tx_id=fabric_student.get("transactionId"),
     )
 
-    _mock_blockchain_storage[student.student_id] = record
 
-    return record
-
-
-def get_student_from_blockchain(student_id: str) -> BlockchainRecord | None:
-    return _mock_blockchain_storage.get(student_id)
+def get_student_from_blockchain(student_id: str) -> dict[str, Any] | None:
+    try:
+        return fabric_client.query_student(student_id)
+    except fabric_client.StudentNotFoundError:
+        return None
 
 
 def verify_student_on_blockchain(student):
+    current_metadata_hash = calculate_student_hash(student)
     record = get_student_from_blockchain(student.student_id)
 
     if record is None:
         return {
             "verification_status": "Not Found",
+            "metadata_hash_mysql": current_metadata_hash,
             "metadata_hash_blockchain": None,
-            "message": "Student exists in MySQL but has not been synced to blockchain.",
+            "message": "Student exists in MySQL but does not exist on blockchain.",
         }
 
-    if record.metadata_hash != student.metadata_hash:
+    blockchain_hash = record.get("metadataHash")
+
+    if blockchain_hash != current_metadata_hash:
         return {
             "verification_status": "Mismatch",
-            "metadata_hash_blockchain": record.metadata_hash,
-            "message": "Student data hash does not match blockchain record.",
+            "metadata_hash_mysql": current_metadata_hash,
+            "metadata_hash_blockchain": blockchain_hash,
+            "message": "Student data has been changed. MySQL hash does not match blockchain hash.",
         }
 
     return {
         "verification_status": "Verified",
-        "metadata_hash_blockchain": record.metadata_hash,
+        "metadata_hash_mysql": current_metadata_hash,
+        "metadata_hash_blockchain": blockchain_hash,
         "message": "Student data is verified on blockchain.",
     }
-

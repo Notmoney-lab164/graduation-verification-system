@@ -1,37 +1,42 @@
 # Graduation Verification Backend API
 
-## Base URL
+Tai lieu ket noi Frontend React voi Backend FastAPI cho he thong xac minh tot nghiep.
 
-```text
-http://localhost:8000
-```
+## 1. Thong tin chung
 
-## Project Pages
-
-| Page | Route goi y | Muc dich |
-|---|---|---|
-| Public Verify Page | `/verify` | Nguoi dung nhap MSSV de kiem tra tot nghiep |
-| Admin Dashboard | `/admin` | Admin quan ly sinh vien, dashboard, sync blockchain |
-| Student Detail / Share Link | `/verify/{student_id}` | Xem chi tiet xac thuc, chia se cho doanh nghiep |
-
-## Verify Status
-
-| Status | Y nghia |
+| Noi dung | Gia tri |
 |---|---|
-| `Verified` | Du lieu MySQL khop voi Blockchain |
-| `Mismatch` | Du lieu MySQL da bi thay doi so voi Blockchain |
-| `Not Synced` | Sinh vien co trong MySQL nhung chua sync Blockchain |
-| `Not Registered` | Khong tim thay sinh vien trong MySQL |
+| Base URL local | `http://localhost:8000` |
+| Swagger | `http://localhost:8000/docs` |
+| Database nghiep vu | MySQL |
+| Blockchain xac minh | Hyperledger Fabric |
+| Fabric channel | `mychannel` |
+| Fabric chaincode | `graduation` |
+
+### Quy tac he thong
+
+- Frontend chi goi FastAPI, khong ket noi truc tiep MySQL, Fabric hoac CouchDB.
+- Backend tinh SHA-256 tu `student_id`, `gpa`, `graduation_status`.
+- Backend ghi hash len Hyperledger Fabric va so sanh hash khi verify.
+- Cac API bat dau bang `/api/admin/` can JWT token.
+- Cac API verify, OTP va gui yeu cau la public.
 
 ---
 
-# 1. Admin Login
+## 2. Trang React va luong chinh
 
-## POST `/api/auth/login`
+| Trang | Muc dich | API chinh |
+|---|---|---|
+| `/login` | Dang nhap Admin | `POST /api/auth/login` |
+| `/admin` | Dashboard va quan ly | `/api/admin/...` |
+| `/verify` | Nhap MSSV de tra cuu | `GET /api/verify/{student_id}` |
+| `/verify/:studentId` | Chi tiet ket qua xac minh | `GET /api/verify/{student_id}` |
 
-Dung cho trang dang nhap admin.
+---
 
-### Request
+## 3. Dang nhap Admin
+
+### POST `/api/auth/login`
 
 ```json
 {
@@ -40,161 +45,109 @@ Dung cho trang dang nhap admin.
 }
 ```
 
-### Response
+Response:
 
 ```json
 {
-  "access_token": "...",
+  "access_token": "eyJ...",
   "token_type": "bearer"
 }
 ```
 
-Frontend luu token va gui vao header khi goi API admin:
+Frontend luu token va gui trong header cua moi API Admin:
 
-```text
+```http
 Authorization: Bearer <access_token>
 ```
+
+Neu backend tra `401`, frontend xoa token va chuyen nguoi dung ve `/login`.
 
 ---
 
-# 2. Admin Dashboard APIs
+## 4. Dashboard va quan ly sinh vien
 
-Tat ca API admin ben duoi can header:
+Tat ca API trong muc nay can JWT token.
 
-```text
-Authorization: Bearer <access_token>
-```
+### GET `/api/admin/stats`
 
-## GET `/api/admin/stats`
-
-Dung cho cac o thong ke tren dashboard.
-
-### Response Example
+Lay so lieu dashboard.
 
 ```json
 {
-  "total_students": 1,
-  "graduated_students": 1,
+  "total_students": 2,
+  "graduated_students": 2,
   "not_graduated_students": 0,
   "pending_students": 0,
-  "synced_blockchain": 1,
+  "synced_blockchain": 2,
   "not_synced_blockchain": 0,
   "graduation_status": {
-    "GRADUATED": 1
+    "GRADUATED": 2
   },
   "mismatch_count": 0
 }
 ```
 
-## GET `/api/admin/students`
+### GET `/api/admin/students`
 
-Dung cho bang danh sach sinh vien.
+Lay danh sach sinh vien.
 
-### Query Params
+| Query | Mo ta |
+|---|---|
+| `page` | Trang hien tai, mac dinh `1` |
+| `page_size` | So dong moi trang, mac dinh `20`, toi da `100` |
+| `search` | Tim theo MSSV hoac ho ten |
+| `graduation_status` | `GRADUATED`, `NOT_GRADUATED`, `PENDING` |
 
-| Param | Bat buoc | Mo ta |
-|---|---|---|
-| `page` | Khong | Trang hien tai, mac dinh `1` |
-| `page_size` | Khong | So dong moi trang, mac dinh `20` |
-| `search` | Khong | Tim theo MSSV hoac ho ten |
-| `graduation_status` | Khong | Loc theo trang thai tot nghiep |
+Vi du:
 
-### Example
+```http
+GET /api/admin/students?search=SVFAB012&page=1&page_size=20
+```
+
+### POST `/api/admin/students`
+
+Admin tao sinh vien chinh thuc cua truong.
 
 ```text
-GET /api/admin/students?page=1&page_size=20
-GET /api/admin/students?search=SV001
-GET /api/admin/students?graduation_status=GRADUATED
+Tao student
+-> Tao hash
+-> Ghi Fabric thanh cong
+-> Luu MySQL
+-> approval_status = APPROVED
 ```
 
-### Response Example
+Request mau:
 
 ```json
 {
-  "items": [
-    {
-      "student_id": "SV001",
-      "full_name": "Nguyen Van A",
-      "date_of_birth": "2002-05-10",
-      "citizen_id_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "email": "sv001@fpt.edu.vn",
-      "institution_code": "FPTU",
-      "institution_name": "FPT University",
-      "faculty_name": "Information Technology",
-      "major": "Software Engineering",
-      "training_mode": "Full-time",
-      "degree_id": "DEGREE001",
-      "degree_type": "Bachelor",
-      "graduation_status": "GRADUATED",
-      "graduation_date": "2026-06-01",
-      "graduation_year": 2026,
-      "classification": "Good",
-      "gpa": "3.20",
-      "total_credits": 145,
-      "entrance_year": 2022,
-      "metadata_hash": "...",
-      "blockchain_tx_id": "mock-tx-SV001",
-      "updated_by": "admin",
-      "created_at": "2026-06-10T07:52:58",
-      "updated_at": "2026-06-10T07:52:58"
-    }
-  ],
-  "total": 1,
-  "page": 1,
-  "page_size": 20,
-  "total_pages": 1
-}
-```
-
-## POST `/api/admin/students`
-
-Them sinh vien moi.
-
-### Request Example
-
-```json
-{
-  "student_id": "SV001",
-  "full_name": "Nguyen Van A",
+  "student_id": "SVFAB012",
+  "full_name": "FastAPI Fabric Integration Test",
   "date_of_birth": "2002-05-10",
-  "citizen_id_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "email": "sv001@fpt.edu.vn",
+  "citizen_id_hash": "hash_cccd_64_ky_tu",
+  "email": "svfab012@fpt.edu.vn",
   "institution_code": "FPTU",
   "institution_name": "FPT University",
   "faculty_name": "Information Technology",
   "major": "Software Engineering",
   "training_mode": "Full-time",
-  "degree_id": "DEGREE001",
+  "degree_id": "DEGREEFAB012",
   "degree_type": "Bachelor",
   "graduation_status": "GRADUATED",
   "graduation_date": "2026-06-01",
   "graduation_year": 2026,
   "classification": "Good",
-  "gpa": 3.2,
-  "total_credits": 145,
+  "gpa": 3.5,
   "entrance_year": 2022
 }
 ```
 
-### Response
+### GET `/api/admin/students/{student_id}`
 
-Tra ve thong tin sinh vien vua tao, kem `metadata_hash`.
+Lay day du thong tin sinh vien de hien trong form sua.
 
-## GET `/api/admin/students/{student_id}`
+### PUT `/api/admin/students/{student_id}`
 
-Xem chi tiet mot sinh vien trong admin.
-
-### Example
-
-```text
-GET /api/admin/students/SV001
-```
-
-## PUT `/api/admin/students/{student_id}`
-
-Sua thong tin sinh vien.
-
-### Request Example
+Cap nhat mot hoac nhieu field.
 
 ```json
 {
@@ -203,238 +156,377 @@ Sua thong tin sinh vien.
 }
 ```
 
-### Note
-
-Neu sinh vien da sync Blockchain, sau khi sua thong tin thi hash MySQL thay doi. Luc nay verify co the tra ve `Mismatch` cho den khi admin sync Blockchain lai.
-
-## DELETE `/api/admin/students/{student_id}`
-
-Xoa sinh vien.
-
-### Example
+Quy trinh cap nhat:
 
 ```text
-DELETE /api/admin/students/SV001
+Cap nhat student
+-> Tao hash moi
+-> Cap nhat Fabric thanh cong
+-> Cap nhat MySQL
 ```
 
-## POST `/api/admin/students/{student_id}/sync-blockchain`
+Neu Fabric loi, thay doi moi trong MySQL bi rollback.
 
-Dong bo `metadata_hash` cua sinh vien len Blockchain.
+### DELETE `/api/admin/students/{student_id}`
 
-### Muc dich
+Xoa mem sinh vien. Du lieu van con trong MySQL voi `is_deleted = true`.
 
-Chot du lieu xac thuc len Blockchain de sau nay phat hien MySQL co bi sua hay khong.
+### POST `/api/admin/students/{student_id}/restore`
 
-### Example
-
-```text
-POST /api/admin/students/SV001/sync-blockchain
-```
-
-### Response Example
-
-```json
-{
-  "message": "Student synced to blockchain",
-  "student_id": "SV001",
-  "metadata_hash": "...",
-  "tx_id": "mock-tx-SV001",
-  "synced_at": "2026-06-10T08:02:24.725002Z"
-}
-```
-
-## POST `/api/admin/students/{student_id}/simulate-tamper`
-
-Demo sua GPA trong MySQL de kiem tra Blockchain phat hien du lieu bi thay doi.
-
-### Example
-
-```text
-POST /api/admin/students/SV001/simulate-tamper
-```
-
-### Ket qua
-
-```text
-GPA trong MySQL bi doi thanh 3.90.
-metadata_hash MySQL thay doi.
-Blockchain van giu hash cu.
-GET /api/verify/SV001 se tra ve Mismatch.
-```
+Khoi phuc sinh vien da xoa mem. Backend dat `is_deleted = false`.
 
 ---
 
-# 3. Public Verify APIs
+## 5. Xac minh cong khai
 
-Public API khong can token.
+### GET `/api/verify/{student_id}`
 
-## GET `/api/verify/{student_id}`
+Nguoi dung, sinh vien hoac doanh nghiep nhap MSSV de xac minh.
 
-Dung cho trang nguoi dung nhap MSSV de kiem tra tot nghiep.
-
-### Example
-
-```text
-GET /api/verify/SV001
+```http
+GET /api/verify/SVFAB012
 ```
 
-### Response: Verified
+Response mau:
 
 ```json
 {
-  "student_id": "SV001",
-  "full_name": "Nguyen Van A",
+  "student_id": "SVFAB012",
+  "full_name": "FastAPI Fabric Integration Test",
+  "date_of_birth": "2002-05-10",
+  "email": "svfab012@fpt.edu.vn",
+  "institution_name": "FPT University",
+  "faculty_name": "Information Technology",
+  "major": "Software Engineering",
+  "training_mode": "Full-time",
+  "degree_id": "DEGREEFAB012",
+  "degree_type": "Bachelor",
+  "entrance_year": 2022,
   "graduation_status": "GRADUATED",
+  "graduation_date": "2026-06-01",
+  "graduation_year": 2026,
+  "classification": "Good",
+  "gpa": "3.50",
+  "is_graduated": true,
   "verification_status": "Verified",
   "message": "Student data is verified on blockchain.",
-  "metadata_hash_mysql": "...",
-  "metadata_hash_blockchain": "...",
-  "blockchain_tx_id": "mock-tx-SV001"
+  "verified_at": "2026-06-22T05:00:00Z"
 }
 ```
 
-### Response: Not Synced
+### Trang thai verify
 
-```json
-{
-  "student_id": "SV001",
-  "full_name": "Nguyen Van A",
-  "graduation_status": "GRADUATED",
-  "verification_status": "Not Synced",
-  "message": "Student exists in MySQL but has not been synced to blockchain yet.",
-  "metadata_hash_mysql": "...",
-  "metadata_hash_blockchain": null,
-  "blockchain_tx_id": null
-}
-```
-
-### Response: Mismatch
-
-```json
-{
-  "student_id": "SV001",
-  "full_name": "Nguyen Van A",
-  "graduation_status": "GRADUATED",
-  "verification_status": "Mismatch",
-  "message": "Student data hash does not match blockchain record.",
-  "metadata_hash_mysql": "...",
-  "metadata_hash_blockchain": "...",
-  "blockchain_tx_id": "mock-tx-SV001"
-}
-```
-
-### Response: Not Registered
-
-```json
-{
-  "student_id": "SV999",
-  "full_name": null,
-  "graduation_status": "UNKNOWN",
-  "verification_status": "Not Registered",
-  "message": "Student does not exist in MySQL.",
-  "metadata_hash_mysql": null,
-  "metadata_hash_blockchain": null,
-  "blockchain_tx_id": null
-}
-```
-
-## GET `/api/verify/{student_id}/export-pdf`
-
-Tai file PDF ket qua xac thuc.
-
-### Example
-
-```text
-GET /api/verify/SV001/export-pdf
-```
-
-### Response
-
-```text
-Content-Type: application/pdf
-File name: graduation-verification-SV001.pdf
-```
-
-Dung cho nut:
-
-```text
-Tai PDF
-```
-
----
-
-# 4. Student Detail / Share Link
-
-Trang detail dung lai API:
-
-```text
-GET /api/verify/{student_id}
-```
-
-Frontend route goi y:
-
-```text
-/verify/SV001
-```
-
-Trang nay nen hien thi:
-
-| Field | Mo ta |
+| `verification_status` | Text giao dien |
 |---|---|
-| `student_id` | MSSV |
-| `full_name` | Ho ten |
-| `graduation_status` | Trang thai tot nghiep |
-| `gpa` | Diem GPA, lay tu API admin hoac bo sung vao verify response |
-| `metadata_hash_mysql` | Hash tinh tu du lieu MySQL |
-| `metadata_hash_blockchain` | Hash luu tren Blockchain |
-| `blockchain_tx_id` | Transaction ID |
-| `verification_status` | Ket qua xac thuc |
-| PDF button | Goi `/api/verify/{student_id}/export-pdf` |
+| `Verified` | Da xac minh hop le |
+| `Mismatch` | Du lieu bi thay doi |
+| `Not Registered` | Khong tim thay sinh vien |
+| `Not Found` | Chua co ban ghi tren Blockchain |
+
+### Quy tac hien thi public
+
+Hien: ho ten, MSSV, truong, khoa, nganh, he dao tao, GPA, xep loai, nam tot nghiep, trang thai va ket qua xac minh.
+
+Khong hien: CCCD, `citizen_id_hash`, hash MySQL, hash Fabric, `is_mismatch`, dia chi thuong tru va noi cap CCCD.
+
+### Sinh vien chua tot nghiep
+
+Neu:
+
+```text
+verification_status = Verified
+graduation_status = NOT_GRADUATED
+```
+
+Frontend van hien nut **Xem chi tiet thong tin sinh vien**.
+
+Trang chi tiet can hien ro:
+
+```text
+Thong tin da duoc xac minh hop le.
+Sinh vien hien chua tot nghiep.
+```
+
+Khong hien nhu da tot nghiep:
+
+```text
+Ngay tot nghiep: Chua co
+Xep loai tot nghiep: Chua co
+Yeu cau giay xac nhan tot nghiep: Khong kha dung
+```
+
+Chi an nut Xem chi tiet khi `verification_status` la `Mismatch`, `Not Found` hoac `Not Registered`.
 
 ---
 
-# 5. Main Demo Flow
+## 6. Yeu cau thong tin tu ben ngoai
+
+### POST `/api/external-requests`
+
+Nguoi ngoai hoac doanh nghiep gui thong tin can nha truong kiem tra.
+
+```json
+{
+  "student_id": "SVEXT021",
+  "full_name": "Le Minh Anh",
+  "gpa": 3.2,
+  "graduation_status": "GRADUATED",
+  "requester_name": "Cong ty Test",
+  "requester_email": "hr@company.vn",
+  "requester_type": "EMPLOYER",
+  "message": "Can xac nhan tot nghiep"
+}
+```
+
+Trang thai ban dau la `PENDING_REVIEW`.
+
+### GET `/api/admin/external-requests`
+
+Admin xem danh sach yeu cau tu ben ngoai.
+
+```http
+GET /api/admin/external-requests?status=PENDING_REVIEW
+```
+
+### POST `/api/admin/external-requests/{request_id}/approve`
+
+Admin xac nhan yeu cau hop le.
 
 ```text
-1. Admin dang nhap lay token.
-2. Admin them sinh vien.
-3. User verify lan dau: Not Synced.
-4. Admin sync Blockchain.
-5. User verify lai: Verified.
-6. Admin simulate tamper GPA.
-7. User verify lai: Mismatch.
-8. User tai PDF ket qua xac thuc.
+Fabric commit thanh cong
+-> Tao student trong MySQL
+-> External request = APPROVED
+-> Ghi audit log
+```
+
+### POST `/api/admin/external-requests/{request_id}/reject`
+
+Admin tu choi yeu cau va luu ly do.
+
+```text
+PENDING_REVIEW -> REJECTED
 ```
 
 ---
 
-# 6. Frontend Notes
+## 7. Yeu cau giay xac nhan
 
-## Auth
+Nguoi dung khong can tai khoan. Ho xac nhan email bang OTP truoc khi gui yeu cau.
 
-Admin API can header:
+### Buoc 1: POST `/api/certificate-requests/otp/send`
 
-```text
-Authorization: Bearer <access_token>
+```json
+{
+  "student_id": "SVFAB012",
+  "requester_email": "user@example.com"
+}
 ```
 
-Public verify API khong can token.
+Backend gui OTP 6 so den email cua nguoi yeu cau.
 
-## Status Color Mapping
+### Buoc 2: POST `/api/certificate-requests/otp/verify`
 
-| Status | Mau goi y |
+```json
+{
+  "student_id": "SVFAB012",
+  "requester_email": "user@example.com",
+  "otp_code": "123456"
+}
+```
+
+Response tra token dung mot lan:
+
+```json
+{
+  "message": "Email verified successfully.",
+  "email_verification_token": "token_xac_nhan_email",
+  "expires_at": "2026-06-22T..."
+}
+```
+
+### Buoc 3: POST `/api/certificate-requests`
+
+```json
+{
+  "student_id": "SVFAB012",
+  "requester_name": "Nguyen Thi C",
+  "requester_email": "user@example.com",
+  "reason": "Can giay xac nhan tot nghiep de bo sung ho so tuyen dung.",
+  "email_verification_token": "token_xac_nhan_email"
+}
+```
+
+Trang thai ban dau la `CERTIFICATE_PENDING`.
+
+### GET `/api/admin/certificate-requests`
+
+Admin xem danh sach yeu cau giay.
+
+```http
+GET /api/admin/certificate-requests?status=CERTIFICATE_PENDING
+```
+
+### POST `/api/admin/certificate-requests/{request_id}/approve`
+
+```json
+{
+  "admin_note": "Yeu cau hop le. Vui long mang CCCD goc den Phong Dao Tao trong gio hanh chinh de nhan giay xac nhan."
+}
+```
+
+Ket qua:
+
+```text
+CERTIFICATE_PENDING -> CERTIFICATE_APPROVED
+```
+
+Backend gui email thong bao cho nguoi yeu cau.
+
+### POST `/api/admin/certificate-requests/{request_id}/reject`
+
+```json
+{
+  "reject_reason": "Thong tin yeu cau chua day du. Vui long bo sung va gui lai."
+}
+```
+
+Ket qua:
+
+```text
+CERTIFICATE_PENDING -> CERTIFICATE_REJECTED
+```
+
+Backend gui email kem ly do tu choi.
+
+### GET `/api/admin/certificate-requests/{request_id}/print-data`
+
+Chi Admin duoc goi API nay.
+
+API tra du lieu de React tao trang in Giay xac nhan:
+
+- Ho ten, MSSV, ngay sinh
+- CCCD that, ngay cap, noi cap, dia chi thuong tru
+- Truong, khoa, nganh, he dao tao
+- Nam nhap hoc, GPA, xep loai, trang thai tot nghiep
+- Thong tin nguoi yeu cau
+- Nguoi duyet va thoi gian duyet
+
+Frontend dung du lieu nay de render trang in. Admin bam `Ctrl + P` de in hoac luu PDF.
+
+Khong duoc dung API `print-data` cho trang public.
+
+---
+
+## 8. Audit log
+
+### GET `/api/admin/audit-logs`
+
+Admin xem lich su thao tac.
+
+| Query | Mo ta |
 |---|---|
-| `Verified` | Xanh |
-| `Mismatch` | Do |
-| `Not Synced` | Vang |
-| `Not Registered` | Xam |
+| `username` | Loc theo tai khoan Admin |
+| `action` | Loc theo hanh dong |
+| `entity_type` | `Student`, `ExternalRequest`, `CertificateRequest` |
+| `search` | Tim kiem |
+| `page` | Trang hien tai |
+| `page_size` | So dong moi trang |
 
-## Important Note
+Vi du:
 
-Hien tai backend dang dung mock blockchain service, nen `tx_id` co dang:
-
-```text
-mock-tx-SV001
+```http
+GET /api/admin/audit-logs?action=APPROVE_CERTIFICATE_REQUEST
+GET /api/admin/audit-logs?action=REJECT_CERTIFICATE_REQUEST
+GET /api/admin/audit-logs?entity_type=Student
 ```
 
-Khi noi Hyperledger Fabric that, `tx_id` se la transaction ID that tu Fabric.
+Action quan trong:
+
+```text
+CREATE_STUDENT
+UPDATE_STUDENT
+DELETE_STUDENT
+RESTORE_STUDENT
+APPROVE_EXTERNAL_REQUEST
+REJECT_EXTERNAL_REQUEST
+APPROVE_CERTIFICATE_REQUEST
+REJECT_CERTIFICATE_REQUEST
+VIEW_CERTIFICATE_PRINT_DATA
+```
+
+---
+
+## 9. Loi frontend can xu ly
+
+| HTTP | Y nghia |
+|---:|---|
+| `400` | OTP sai, OTP het han, request da duoc xu ly |
+| `401` | JWT Admin khong hop le hoac het han |
+| `404` | Khong tim thay sinh vien hoac request |
+| `409` | Du lieu trung hoac thong tin private chua du de in |
+| `422` | Du lieu form sai |
+| `503` | Fabric hoac SMTP tam thoi khong san sang |
+
+---
+
+## 10. Khoi dong local
+
+### Sau khi khoi dong lai may
+
+```bash
+docker start \
+  orderer.example.com \
+  couchdb0 \
+  couchdb1 \
+  peer0.org1.example.com \
+  peer0.org2.example.com
+```
+
+Kiem tra:
+
+```bash
+docker ps
+```
+
+Can thay cac container Fabric va `graduation_mysql` dang chay.
+
+### Chay Backend
+
+```bash
+cd ~/graduation-verification-system/backend
+source venv/bin/activate
+python3 -m uvicorn main:app --reload
+```
+
+Backend: `http://localhost:8000`
+
+Swagger: `http://localhost:8000/docs`
+
+### Chay Frontend React
+
+```bash
+cd ~/graduation-verification-system/frontend
+npm install
+npm run dev
+```
+
+Frontend Vite thuong chay tai `http://localhost:5173`.
+
+---
+
+## 11. Workflow tong quat
+
+```text
+Admin tao/cap nhat sinh vien
+-> MySQL + Hyperledger Fabric
+-> Public verify so sanh hash
+-> Verified hoac Mismatch
+
+Nguoi dung gui yeu cau giay
+-> Email OTP
+-> Tao certificate request
+-> Admin duyet hoac tu choi
+-> Backend gui email thong bao
+-> Admin lay print-data
+-> React tao trang in Giay xac nhan
+```

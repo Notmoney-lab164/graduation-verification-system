@@ -7,153 +7,183 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
+load_dotenv()
 
-STUDENT_ID_PATTERN = re.compile(r"^[A-Z]{2}[0-9]{6}$")
-
-
-class FabricError(Exception):
-    def __init__(self, code: str, message: str, status_code: int = 500) -> None:
-        self.code = code
-        self.message = message
-        self.status_code = status_code
-        super().__init__(message)
+STUDENT_ID_PATTERN = re.compile(r"^[A-Z0-9_-]{2,30}$")
 
 
-class StudentNotFoundError(FabricError):
-    def __init__(self, student_id: str) -> None:
-        super().__init__(
-            code="STUDENT_NOT_FOUND",
-            message=f"Student {student_id} does not exist",
-            status_code=404,
-        )
+class FabricClientError(RuntimeError):
+    pass
 
 
-class InvalidStudentIdError(FabricError):
-    def __init__(self) -> None:
-        super().__init__(
-            code="INVALID_STUDENT_ID",
-            message="studentId must use format: 2 uppercase letters followed by 6 digits, for example SE182026",
-            status_code=400,
-        )
+class StudentNotFoundError(FabricClientError):
+    pass
 
 
-class FabricUnavailableError(FabricError):
-    def __init__(self) -> None:
-        super().__init__(
-            code="FABRIC_UNAVAILABLE",
-            message="Fabric network is unavailable",
-            status_code=503,
-        )
+class StudentAlreadyExistsError(FabricClientError):
+    pass
 
 
-class FabricTimeoutError(FabricError):
-    def __init__(self) -> None:
-        super().__init__(
-            code="FABRIC_TIMEOUT",
-            message="Fabric query timed out",
-            status_code=504,
-        )
+def _env(name: str, default: str | None = None) -> str:
+    value = os.getenv(name, default)
+
+    if not value:
+        raise FabricClientError(f"Missing environment variable: {name}")
+
+    return value
 
 
-def validate_student_id(student_id: str) -> None:
-    if not STUDENT_ID_PATTERN.fullmatch(student_id):
-        raise InvalidStudentIdError()
+def _testnet_path() -> Path:
+    return Path(_env("FABRIC_TESTNET")).expanduser().resolve()
 
 
-def build_peer_env() -> dict[str, str]:
-    testnet = Path(os.environ["FABRIC_TESTNET"]).expanduser()
-    fabric_samples = testnet.parent
+def _validate_student_id(student_id: str) -> str:
+    value = str(student_id).strip()
 
-    env = os.environ.copy()
-    env["PATH"] = f"{fabric_samples / 'bin'}:{env.get('PATH', '')}"
-    env["FABRIC_CFG_PATH"] = str(fabric_samples / "config")
-    env["CORE_PEER_TLS_ENABLED"] = "true"
-    env["CORE_PEER_LOCALMSPID"] = os.environ.get("FABRIC_MSP_ID", "Org1MSP")
-    env["CORE_PEER_ADDRESS"] = os.environ.get("FABRIC_PEER_ENDPOINT", "localhost:7051")
+    if not STUDENT_ID_PATTERN.fullmatch(value):
+        raise FabricClientError("Invalid student_id format")
 
-    org_path = testnet / "organizations/peerOrganizations/org1.example.com"
-    env["CORE_PEER_TLS_ROOTCERT_FILE"] = str(
-        org_path / "peers/peer0.org1.example.com/tls/ca.crt"
-    )
-    env["CORE_PEER_MSPCONFIGPATH"] = str(
-        org_path / "users/Admin@org1.example.com/msp"
-    )
-
-    return env
+    return value
 
 
-def query_student(student_id: str) -> dict[str, Any]:
-    validate_student_id(student_id)
+def _normalize_gpa(gpa: Any) -> str:
+    if gpa is None:
+        return ""
 
-    channel = os.environ.get("FABRIC_CHANNEL", "mychannel")
-    chaincode = os.environ.get("FABRIC_CHAINCODE", "graduation")
-    timeout = int(os.environ.get("FABRIC_QUERY_TIMEOUT", "10"))
+    return str(gpa).strip()
 
-    payload = json.dumps({"Args": ["queryStudent", student_id]})
 
-    cmd = [
-        "peer",
-        "chaincode",
-        "query",
-        "-C",
-        channel,
-        "-n",
-        chaincode,
-        "-c",
-        payload,
-    ]
-
-    try:
-        result = subprocess.run(
-            cmd,
-            env=build_peer_env(),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise FabricTimeoutError() from exc
-    except OSError as exc:
-        raise FabricUnavailableError() from exc
-
-    output = (result.stdout or "").strip()
-    error_output = (result.stderr or "").strip()
-    combined_output = f"{output}\n{error_output}"
-
-    if result.returncode != 0:
-        if "STUDENT_NOT_FOUND" in combined_output or "does not exist" in combined_output:
-            raise StudentNotFoundError(student_id)
-
-        if "connect: connection refused" in combined_output:
-            raise FabricUnavailableError()
-
-        raise FabricError(
-            code="FABRIC_QUERY_FAILED",
-            message="Failed to query student from Fabric",
-            status_code=502,
-        )
-
+def _parse_json(output: str) -> dict[str, Any]:
     try:
         return json.loads(output)
     except json.JSONDecodeError as exc:
-        raise FabricError(
-            code="INVALID_FABRIC_RESPONSE",
-            message="Fabric returned invalid JSON",
-            status_code=502,
-        ) from exc
+        raise FabricClientError(f"Invalid Fabric JSON response: {output}") from exc
+
+
+def _extract_tx_id(output: str) -> str | None:
+    match = re.search(r"txid \[([a-fA-F0-9]+)\]", output)
+
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def build_peer_env() -> dict[str, str]:
+    testnet = _testnet_path()
+
+    peer_msp = (
+        testnet
+        / "organizations"
+        / "peerOrganizations"
+        / "org1.example.com"
+    )
+
+    return {
+        **os.environ,
+        "PATH": f"{testnet.parent / 'bin'}:{os.environ.get('PATH', '')}",
+        "FABRIC_CFG_PATH": str(testnet.parent / "config"),
+        "CORE_PEER_TLS_ENABLED": "true",
+        "CORE_PEER_LOCALMSPID": _env("FABRIC_MSP_ID", "Org1MSP"),
+        "CORE_PEER_MSPCONFIGPATH": str(
+            peer_msp
+            / "users"
+            / "Admin@org1.example.com"
+            / "msp"
+        ),
+        "CORE_PEER_TLS_ROOTCERT_FILE": str(
+            peer_msp
+            / "peers"
+            / "peer0.org1.example.com"
+            / "tls"
+            / "ca.crt"
+        ),
+        "CORE_PEER_ADDRESS": _env("FABRIC_PEER_ENDPOINT", "localhost:7051"),
+    }
+
+
+def _orderer_ca_file() -> str:
+    testnet = _testnet_path()
+
+    return str(
+        testnet
+        / "organizations"
+        / "ordererOrganizations"
+        / "example.com"
+        / "orderers"
+        / "orderer.example.com"
+        / "msp"
+        / "tlscacerts"
+        / "tlsca.example.com-cert.pem"
+    )
+
+
+def _peer0_org1_ca_file() -> str:
+    testnet = _testnet_path()
+
+    return str(
+        testnet
+        / "organizations"
+        / "peerOrganizations"
+        / "org1.example.com"
+        / "peers"
+        / "peer0.org1.example.com"
+        / "tls"
+        / "ca.crt"
+    )
+
+
+def _peer0_org2_ca_file() -> str:
+    testnet = _testnet_path()
+
+    return str(
+        testnet
+        / "organizations"
+        / "peerOrganizations"
+        / "org2.example.com"
+        / "peers"
+        / "peer0.org2.example.com"
+        / "tls"
+        / "ca.crt"
+    )
+
+
+def run_peer_command(args: list[str]) -> str:
+    timeout = int(_env("FABRIC_QUERY_TIMEOUT", "10"))
+
+    result = subprocess.run(
+        ["peer", *args],
+        cwd=str(_testnet_path()),
+        env=build_peer_env(),
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+    )
+
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+    combined_output = "\n".join(item for item in [stdout, stderr] if item)
+
+    if result.returncode != 0:
+        message = combined_output
+
+        if "STUDENT_NOT_FOUND" in message or "does not exist" in message:
+            raise StudentNotFoundError(message)
+
+        if "STUDENT_ALREADY_EXISTS" in message or "already exists" in message:
+            raise StudentAlreadyExistsError(message)
+
+        raise FabricClientError(message)
+
+    return combined_output
+
 
 def peer_query(function_name: str, *args: str) -> str:
-    channel = os.environ.get("FABRIC_CHANNEL", "mychannel")
-    chaincode = os.environ.get("FABRIC_CHAINCODE", "graduation")
-    timeout = int(os.environ.get("FABRIC_QUERY_TIMEOUT", "10"))
-
+    channel = _env("FABRIC_CHANNEL", "mychannel")
+    chaincode = _env("FABRIC_CHAINCODE", "graduation")
     payload = json.dumps({"Args": [function_name, *args]})
 
-    cmd = [
-        "peer",
+    output = run_peer_command([
         "chaincode",
         "query",
         "-C",
@@ -162,54 +192,92 @@ def peer_query(function_name: str, *args: str) -> str:
         chaincode,
         "-c",
         payload,
-    ]
+    ])
 
-    try:
-        result = subprocess.run(
-            cmd,
-            env=build_peer_env(),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise FabricTimeoutError() from exc
-    except OSError as exc:
-        raise FabricUnavailableError() from exc
-
-    output = (result.stdout or "").strip()
-    error_output = (result.stderr or "").strip()
-    combined_output = f"{output}\n{error_output}"
-
-    if result.returncode != 0:
-        if "STUDENT_NOT_FOUND" in combined_output or "does not exist" in combined_output:
-            student_id = args[0] if args else "UNKNOWN"
-            raise StudentNotFoundError(student_id)
-
-        if "connect: connection refused" in combined_output:
-            raise FabricUnavailableError()
-
-        raise FabricError(
-            code="FABRIC_QUERY_FAILED",
-            message="Failed to query Fabric network",
-            status_code=502,
-        )
-
-    return output
+    return output.strip()
 
 
-def verify_graduation(student_id: str) -> dict[str, Any]:
-    validate_student_id(student_id)
+def peer_invoke(function_name: str, *args: str) -> str:
+    channel = _env("FABRIC_CHANNEL", "mychannel")
+    chaincode = _env("FABRIC_CHAINCODE", "graduation")
+    payload = json.dumps({"Args": [function_name, *args]})
 
-    graduation_status = peer_query("verifyGraduation", student_id)
-    integrity_output = peer_query("verifyStudentIntegrity", student_id)
+    return run_peer_command([
+        "chaincode",
+        "invoke",
+        "-o",
+        _env("FABRIC_ORDERER_ENDPOINT", "localhost:7050"),
+        "--ordererTLSHostnameOverride",
+        _env("FABRIC_ORDERER_HOSTNAME", "orderer.example.com"),
+        "--tls",
+        "--cafile",
+        _orderer_ca_file(),
+        "-C",
+        channel,
+        "-n",
+        chaincode,
+        "--peerAddresses",
+        _env("FABRIC_PEER_ENDPOINT", "localhost:7051"),
+        "--tlsRootCertFiles",
+        _peer0_org1_ca_file(),
+        "--peerAddresses",
+        _env("FABRIC_ORG2_PEER_ENDPOINT", "localhost:9051"),
+        "--tlsRootCertFiles",
+        _peer0_org2_ca_file(),
+        "--waitForEvent",
+        "-c",
+        payload,
+    ])
 
-    integrity_valid = integrity_output.lower() == "true"
 
-    return {
-        "studentId": student_id,
-        "graduationStatus": graduation_status,
-        "isGraduated": graduation_status == "GRADUATED",
-        "integrityValid": integrity_valid,
-    }
+def sync_student(student) -> dict[str, Any]:
+    student_id = _validate_student_id(student.student_id)
+    gpa = _normalize_gpa(student.gpa)
+    graduation_status = str(student.graduation_status).strip()
+
+    output = peer_invoke(
+        "syncStudent",
+        student_id,
+        gpa,
+        graduation_status,
+    )
+
+    tx_id = _extract_tx_id(output)
+    record = query_student(student_id)
+
+    if tx_id:
+        record["transactionId"] = tx_id
+
+    return record
+
+
+def create_student(student) -> dict[str, Any]:
+    return sync_student(student)
+
+
+def update_student(student) -> dict[str, Any]:
+    return sync_student(student)
+
+
+def query_student(student_id: str) -> dict[str, Any]:
+    output = peer_query("queryStudent", _validate_student_id(student_id))
+    return _parse_json(output)
+
+
+def read_student(student_id: str) -> dict[str, Any]:
+    return query_student(student_id)
+
+
+def student_exists(student_id: str) -> bool:
+    output = peer_query("studentExists", _validate_student_id(student_id))
+    return output.strip().lower() == "true"
+
+
+def verify_graduation(student_id: str, metadata_hash: str) -> dict[str, Any]:
+    output = peer_query(
+        "verifyGraduation",
+        _validate_student_id(student_id),
+        metadata_hash,
+    )
+
+    return _parse_json(output)

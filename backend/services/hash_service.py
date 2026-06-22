@@ -1,27 +1,13 @@
 import hashlib
 import json
+from datetime import date, datetime
 from decimal import Decimal
 
 
 HASH_FIELDS = [
     "student_id",
-    "full_name",
-    "date_of_birth",
-    "citizen_id_hash",
-    "institution_code",
-    "institution_name",
-    "faculty_name",
-    "major",
-    "training_mode",
-    "degree_id",
-    "degree_type",
-    "graduation_status",
-    "graduation_date",
-    "graduation_year",
-    "classification",
     "gpa",
-    "total_credits",
-    "entrance_year",
+    "graduation_status",
 ]
 
 
@@ -30,9 +16,12 @@ def _normalize_value(value):
         return None
 
     if isinstance(value, Decimal):
-        return str(value)
+        return format(value, "f")
 
-    return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+
+    return str(value).strip()
 
 
 def build_student_metadata(student):
@@ -44,10 +33,12 @@ def build_student_metadata(student):
 
 def calculate_student_hash(student) -> str:
     metadata = build_student_metadata(student)
+
     canonical_json = json.dumps(
         metadata,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     )
+
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()

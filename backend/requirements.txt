@@ -20,7 +20,6 @@ pydantic_core==2.46.4
 PyMySQL==1.2.0
 python-dotenv==1.2.2
 python-jose==3.5.0
-reportlab==4.5.1
 rsa==4.9.1
 six==1.17.0
 SQLAlchemy==2.0.50
