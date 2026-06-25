@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-STUDENT_ID_PATTERN = re.compile(r"^[A-Z0-9_-]{2,30}$")
+
 
 
 class FabricClientError(RuntimeError):
@@ -37,8 +37,11 @@ def _testnet_path() -> Path:
     return Path(_env("FABRIC_TESTNET")).expanduser().resolve()
 
 
+STUDENT_ID_PATTERN = re.compile(r"^[A-Z0-9]{3,20}$")
+
+
 def _validate_student_id(student_id: str) -> str:
-    value = str(student_id).strip()
+    value = str(student_id or "").strip().upper()
 
     if not STUDENT_ID_PATTERN.fullmatch(value):
         raise FabricClientError("Invalid student_id format")

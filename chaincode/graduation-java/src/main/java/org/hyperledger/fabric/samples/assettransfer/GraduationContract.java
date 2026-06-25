@@ -28,16 +28,15 @@ import org.hyperledger.fabric.shim.ledger.KeyValue;
                 description = "Store and verify graduation metadata hash",
                 version = "1.0",
                 license = @License(name = "Apache-2.0"),
-                contact = @Contact(email = "admin@fpt.edu.vn", name = "FPT University")
+                contact = @Contact(email = "trienptse182026@fpt.edu.vn", name = "FPT University")
         )
 )
 @Default
 public final class GraduationContract implements ContractInterface {
 
     private static final Genson genson = new Genson();
-
-    // MSP ID cua to chuc trong Hyperledger Fabric, khong phai ten truong.
     private static final String AUTHORIZED_ISSUER_MSP = "Org1MSP";
+    private static final String STUDENT_ID_PATTERN = "^[A-Z0-9]{3,20}$";
 
     private enum GraduationErrors {
         STUDENT_ALREADY_EXISTS,
@@ -54,18 +53,23 @@ public final class GraduationContract implements ContractInterface {
             final String graduationStatus) {
 
         assertAuthorizedIssuer(ctx);
-        validateInput(studentId, gpa, graduationStatus);
 
-        if (studentExists(ctx, studentId)) {
+        String normalizedStudentId = normalizeStudentId(studentId);
+        String normalizedGpa = normalizeGpa(gpa);
+        String normalizedStatus = normalizeGraduationStatus(graduationStatus);
+
+        if (studentExists(ctx, normalizedStudentId)) {
             throw new ChaincodeException(
-                    "Student already exists: " + studentId,
+                    "Student already exists: " + normalizedStudentId,
                     GraduationErrors.STUDENT_ALREADY_EXISTS.toString()
             );
         }
 
-        String normalizedGpa = normalizeGpa(gpa);
-        String normalizedStatus = graduationStatus.trim();
-        String metadataHash = calculateMetadataHash(studentId, normalizedGpa, normalizedStatus);
+        String metadataHash = calculateMetadataHash(
+                normalizedStudentId,
+                normalizedGpa,
+                normalizedStatus
+        );
 
         ChaincodeStub stub = ctx.getStub();
         String now = stub.getTxTimestamp().toString();
@@ -73,7 +77,7 @@ public final class GraduationContract implements ContractInterface {
         String issuerMsp = ctx.getClientIdentity().getMSPID();
 
         Student student = new Student(
-                studentId.trim(),
+                normalizedStudentId,
                 normalizedGpa,
                 normalizedStatus,
                 metadataHash,
@@ -83,7 +87,10 @@ public final class GraduationContract implements ContractInterface {
                 now
         );
 
-        stub.putState(student.getStudentId(), genson.serialize(student).getBytes(StandardCharsets.UTF_8));
+        stub.putState(
+                student.getStudentId(),
+                genson.serialize(student).getBytes(StandardCharsets.UTF_8)
+        );
 
         return student;
     }
@@ -96,13 +103,18 @@ public final class GraduationContract implements ContractInterface {
             final String graduationStatus) {
 
         assertAuthorizedIssuer(ctx);
-        validateInput(studentId, gpa, graduationStatus);
 
-        Student oldStudent = queryStudent(ctx, studentId);
-
+        String normalizedStudentId = normalizeStudentId(studentId);
         String normalizedGpa = normalizeGpa(gpa);
-        String normalizedStatus = graduationStatus.trim();
-        String metadataHash = calculateMetadataHash(studentId, normalizedGpa, normalizedStatus);
+        String normalizedStatus = normalizeGraduationStatus(graduationStatus);
+
+        Student oldStudent = queryStudent(ctx, normalizedStudentId);
+
+        String metadataHash = calculateMetadataHash(
+                normalizedStudentId,
+                normalizedGpa,
+                normalizedStatus
+        );
 
         ChaincodeStub stub = ctx.getStub();
         String now = stub.getTxTimestamp().toString();
@@ -120,7 +132,10 @@ public final class GraduationContract implements ContractInterface {
                 now
         );
 
-        stub.putState(updatedStudent.getStudentId(), genson.serialize(updatedStudent).getBytes(StandardCharsets.UTF_8));
+        stub.putState(
+                updatedStudent.getStudentId(),
+                genson.serialize(updatedStudent).getBytes(StandardCharsets.UTF_8)
+        );
 
         return updatedStudent;
     }
@@ -132,26 +147,33 @@ public final class GraduationContract implements ContractInterface {
             final String gpa,
             final String graduationStatus) {
 
-        if (studentExists(ctx, studentId)) {
-            return updateStudent(ctx, studentId, gpa, graduationStatus);
+        String normalizedStudentId = normalizeStudentId(studentId);
+
+        if (studentExists(ctx, normalizedStudentId)) {
+            return updateStudent(ctx, normalizedStudentId, gpa, graduationStatus);
         }
 
-        return createStudent(ctx, studentId, gpa, graduationStatus);
+        return createStudent(ctx, normalizedStudentId, gpa, graduationStatus);
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
     public Student queryStudent(final Context ctx, final String studentId) {
+        String normalizedStudentId = normalizeStudentId(studentId);
+
         ChaincodeStub stub = ctx.getStub();
-        byte[] studentBytes = stub.getState(studentId);
+        byte[] studentBytes = stub.getState(normalizedStudentId);
 
         if (studentBytes == null || studentBytes.length == 0) {
             throw new ChaincodeException(
-                    "Student does not exist: " + studentId,
+                    "Student does not exist: " + normalizedStudentId,
                     GraduationErrors.STUDENT_NOT_FOUND.toString()
             );
         }
 
-        return genson.deserialize(new String(studentBytes, StandardCharsets.UTF_8), Student.class);
+        return genson.deserialize(
+                new String(studentBytes, StandardCharsets.UTF_8),
+                Student.class
+        );
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
@@ -161,8 +183,10 @@ public final class GraduationContract implements ContractInterface {
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
     public boolean studentExists(final Context ctx, final String studentId) {
+        String normalizedStudentId = normalizeStudentId(studentId);
+
         ChaincodeStub stub = ctx.getStub();
-        byte[] studentBytes = stub.getState(studentId);
+        byte[] studentBytes = stub.getState(normalizedStudentId);
 
         return studentBytes != null && studentBytes.length > 0;
     }
@@ -213,31 +237,54 @@ public final class GraduationContract implements ContractInterface {
         }
     }
 
-    private void validateInput(
-            final String studentId,
-            final String gpa,
-            final String graduationStatus) {
-
+    private String normalizeStudentId(final String studentId) {
         if (studentId == null || studentId.trim().isEmpty()) {
-            throw new ChaincodeException("studentId is required", GraduationErrors.INVALID_INPUT.toString());
+            throw new ChaincodeException(
+                    "studentId is required",
+                    GraduationErrors.INVALID_INPUT.toString()
+            );
         }
 
-        if (gpa == null || gpa.trim().isEmpty()) {
-            throw new ChaincodeException("gpa is required", GraduationErrors.INVALID_INPUT.toString());
+        String normalizedStudentId = studentId.trim().toUpperCase();
+
+        if (!normalizedStudentId.matches(STUDENT_ID_PATTERN)) {
+            throw new ChaincodeException(
+                    "Invalid studentId format",
+                    GraduationErrors.INVALID_INPUT.toString()
+            );
         }
 
+        return normalizedStudentId;
+    }
+
+    private String normalizeGraduationStatus(final String graduationStatus) {
         if (graduationStatus == null || graduationStatus.trim().isEmpty()) {
-            throw new ChaincodeException("graduationStatus is required", GraduationErrors.INVALID_INPUT.toString());
+            throw new ChaincodeException(
+                    "graduationStatus is required",
+                    GraduationErrors.INVALID_INPUT.toString()
+            );
         }
+
+        return graduationStatus.trim();
     }
 
     private String normalizeGpa(final String gpa) {
+        if (gpa == null || gpa.trim().isEmpty()) {
+            throw new ChaincodeException(
+                    "gpa is required",
+                    GraduationErrors.INVALID_INPUT.toString()
+            );
+        }
+
         try {
             return new BigDecimal(gpa.trim())
                     .setScale(2, RoundingMode.HALF_UP)
                     .toPlainString();
         } catch (NumberFormatException error) {
-            throw new ChaincodeException("Invalid GPA", GraduationErrors.INVALID_INPUT.toString());
+            throw new ChaincodeException(
+                    "Invalid GPA",
+                    GraduationErrors.INVALID_INPUT.toString()
+            );
         }
     }
 
@@ -249,7 +296,7 @@ public final class GraduationContract implements ContractInterface {
         String canonicalJson = "{"
                 + "\"gpa\":\"" + escapeJson(gpa) + "\","
                 + "\"graduation_status\":\"" + escapeJson(graduationStatus) + "\","
-                + "\"student_id\":\"" + escapeJson(studentId.trim()) + "\""
+                + "\"student_id\":\"" + escapeJson(studentId) + "\""
                 + "}";
 
         return sha256(canonicalJson);
