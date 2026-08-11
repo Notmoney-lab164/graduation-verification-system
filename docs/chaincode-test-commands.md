@@ -305,3 +305,18 @@ Sau đó không dùng `sudo` cho `network.sh`.
 - Chỉ push `backend/.env.example`.
 - Không public `SECRET_KEY`, mật khẩu MySQL, Fabric private key hoặc certificate.
 - Frontend không hiển thị hash thô cho người dùng public.
+
+Vì bạn nói chaincode chưa thay đổi gì và muốn dùng bản cũ hôm qua, thì chỉ cần đảm bảo network đang chạy và chaincode cũ đã committed.
+Bạn chỉ chạy kiểm tra thôi:
+
+cd ~/go/src/github.com/Notmoney-lab164/fabric-samples/test-network
+
+export PATH=~/go/src/github.com/Notmoney-lab164/fabric-samples/bin:$PATH
+export FABRIC_CFG_PATH=~/go/src/github.com/Notmoney-lab164/fabric-samples/config
+
+source scripts/envVar.sh
+setGlobals 1
+
+peer lifecycle chaincode querycommitted \
+  --channelID mychannel \
+  --name graduation

@@ -530,3 +530,16 @@ Nguoi dung gui yeu cau giay
 -> Admin lay print-data
 -> React tao trang in Giay xac nhan
 ```
+
+
+cd ~/graduation-verification-system
+
+docker compose up -d --force-recreate backend
+
+docker compose exec -T backend sh -lc '
+if [ -d /fabric-samples/test-network ]; then
+  echo "MOUNT_OK"
+else
+  echo "MOUNT_MISSING"
+fi
+'

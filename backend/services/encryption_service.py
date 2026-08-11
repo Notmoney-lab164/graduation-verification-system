@@ -18,8 +18,8 @@ def _get_fernet() -> Fernet:
         raise EncryptionError("ENCRYPTION_KEY is not configured")
 
     try:
-        return Fernet(encryption_key.encode("utf-8"))
-    except ValueError as exc:
+        return Fernet(encryption_key.strip().encode("utf-8"))
+    except (ValueError, TypeError) as exc:
         raise EncryptionError("ENCRYPTION_KEY is invalid") from exc
 
 
@@ -27,7 +27,7 @@ def encrypt_value(value: str | None) -> str | None:
     if value is None:
         return None
 
-    normalized_value = value.strip()
+    normalized_value = str(value).strip()
 
     if not normalized_value:
         return None
@@ -41,11 +41,24 @@ def decrypt_value(encrypted_value: str | None) -> str | None:
     if encrypted_value is None:
         return None
 
+    normalized_value = str(encrypted_value).strip()
+
+    if not normalized_value:
+        return None
+
     try:
         return _get_fernet().decrypt(
-            encrypted_value.encode("utf-8")
+            normalized_value.encode("utf-8")
         ).decode("utf-8")
     except InvalidToken as exc:
         raise EncryptionError(
             "Cannot decrypt sensitive student data"
         ) from exc
+
+
+def encrypt_text(value: str | None) -> str | None:
+    return encrypt_value(value)
+
+
+def decrypt_text(value: str | None) -> str | None:
+    return decrypt_value(value)

@@ -1,133 +1,157 @@
+from __future__ import annotations
+
 import logging
-import os
 import smtplib
 from email.message import EmailMessage
+
+from sqlalchemy.orm import Session
+
+import crud
+from services.encryption_service import decrypt_value
 
 
 logger = logging.getLogger(__name__)
 
 
 def send_email(
+    db: Session,
     to_email: str,
     subject: str,
     body: str,
+    reply_to: str | None = None,
 ) -> None:
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_username = os.getenv("SMTP_USERNAME")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    from_email = os.getenv("SMTP_FROM_EMAIL")
-    from_name = os.getenv(
-        "SMTP_FROM_NAME",
-        "Graduation Verification System",
-    )
+    email_setting = crud.get_active_email_setting(db)
 
-    required_values = [
-        smtp_host,
-        smtp_username,
-        smtp_password,
-        from_email,
-    ]
+    if email_setting is None:
+        raise RuntimeError("Active email setting is not configured")
 
-    if not all(required_values):
-        raise RuntimeError("SMTP email configuration is incomplete")
+    smtp_password = decrypt_value(email_setting.smtp_password_encrypted)
+
+    if not smtp_password:
+        raise RuntimeError("SMTP password is empty")
 
     message = EmailMessage()
-    message["From"] = f"{from_name} <{from_email}>"
+    message["From"] = (
+        f"{email_setting.smtp_from_name} "
+        f"<{email_setting.smtp_from_email}>"
+    )
     message["To"] = to_email
     message["Subject"] = subject
+
+    if reply_to:
+        message["Reply-To"] = reply_to
+
     message.set_content(body)
 
     with smtplib.SMTP(
-        smtp_host,
-        smtp_port,
+        email_setting.smtp_host,
+        email_setting.smtp_port,
         timeout=20,
     ) as server:
         server.ehlo()
         server.starttls()
         server.ehlo()
-        server.login(smtp_username, smtp_password)
+        server.login(
+            email_setting.smtp_username,
+            smtp_password,
+        )
         server.send_message(message)
 
     logger.info("Email sent to %s", to_email)
 
 
-def send_certificate_request_otp(
-    requester_email: str,
-    student_id: str,
-    otp_code: str,
-    expires_in_minutes: int = 10,
-) -> None:
-    send_email(
-        to_email=requester_email,
-        subject="Ma OTP xac minh yeu cau giay xac nhan",
-        body=(
-            "Ma OTP xac minh email cua ban la:\n\n"
-            f"{otp_code}\n\n"
-            f"Ma OTP co hieu luc trong {expires_in_minutes} phut.\n"
-            f"Ma sinh vien: {student_id}\n\n"
-            "Khong chia se ma OTP nay voi bat ky ai."
-        ),
-    )
-
-
-def notify_admin_new_certificate_request(
+def notify_admins_new_certificate_request(
+    db: Session,
     request_id: int,
     student_id: str,
     requester_name: str,
+    requester_email: str,
 ) -> None:
-    admin_email = os.getenv("ADMIN_NOTIFICATION_EMAIL")
+    admin_emails = crud.list_active_admin_emails(db)
 
-    if not admin_email:
-        raise RuntimeError(
-            "ADMIN_NOTIFICATION_EMAIL is not configured"
+    if not admin_emails:
+        raise RuntimeError("No active admin email found")
+
+    for admin_email in admin_emails:
+        send_email(
+            db=db,
+            to_email=admin_email,
+            subject=f"Yêu cầu cấp giấy xác nhận tốt nghiệp #{request_id}",
+            body=(
+                "Có một yêu cầu cấp giấy xác nhận tốt nghiệp mới.\n\n"
+                f"Mã yêu cầu: {request_id}\n"
+                f"Mã số sinh viên: {student_id}\n"
+                f"Người yêu cầu: {requester_name}\n"
+                f"Email người yêu cầu: {requester_email}\n\n"
+                "Vui lòng đăng nhập trang quản trị để kiểm tra và xử lý yêu cầu."
+            ),
+            reply_to=requester_email,
         )
-
-    send_email(
-        to_email=admin_email,
-        subject=f"New certificate request #{request_id}",
-        body=(
-            "A new graduation certificate request was submitted.\n\n"
-            f"Request ID: {request_id}\n"
-            f"Student ID: {student_id}\n"
-            f"Requester: {requester_name}\n\n"
-            "Please open the admin dashboard to review the request."
-        ),
-    )
 
 
 def notify_requester_certificate_approved(
+    db: Session,
     requester_email: str,
     student_id: str,
     admin_note: str | None,
 ) -> None:
     note = admin_note or (
-        "Please bring your original citizen ID card to the "
-        "Academic Affairs Office to receive the confirmation document."
+        "Yêu cầu của bạn đã được duyệt. "
+        "Vui lòng liên hệ phòng đào tạo để nhận giấy xác nhận tốt nghiệp."
     )
 
     send_email(
+        db=db,
         to_email=requester_email,
-        subject="Graduation certificate request approved",
+        subject="Yêu cầu cấp giấy xác nhận tốt nghiệp đã được duyệt",
         body=(
-            "Your graduation certificate request has been approved.\n\n"
-            f"Student ID: {student_id}\n"
-            f"Thong bao tu nha truong: {note}\n"
+            "Yêu cầu cấp giấy xác nhận tốt nghiệp của bạn đã được duyệt.\n\n"
+            f"Mã số sinh viên: {student_id}\n"
+            f"Hướng dẫn từ admin: {note}\n"
         ),
     )
 
 
 def notify_requester_certificate_rejected(
+    db: Session,
     requester_email: str,
     student_id: str,
     reject_reason: str,
 ) -> None:
     send_email(
+        db=db,
         to_email=requester_email,
-        subject="Graduation certificate request rejected",
+        subject="Yêu cầu cấp giấy xác nhận tốt nghiệp đã bị từ chối",
         body=(
-            "Your graduation certificate request was rejected.\n\n"
-            f"Student ID: {student_id}\n"
-            f"Reason: {reject_reason}\n"
+            "Yêu cầu cấp giấy xác nhận tốt nghiệp của bạn đã bị từ chối.\n\n"
+            f"Mã số sinh viên: {student_id}\n"
+            f"Lý do từ chối: {reject_reason}\n"
         ),
+    )
+
+
+def send_certificate_request_otp_email(
+    db: Session,
+    to_email: str,
+    student_id: str,
+    otp_code: str,
+) -> None:
+    subject = "Mã OTP xác thực yêu cầu cấp giấy xác nhận tốt nghiệp"
+
+    body = (
+        "Xin chào,\n\n"
+        "Bạn đang thực hiện yêu cầu cấp giấy xác nhận tốt nghiệp.\n\n"
+        f"Mã số sinh viên: {student_id}\n"
+        f"Mã OTP của bạn là: {otp_code}\n\n"
+        "Mã OTP này chỉ dùng để xác thực yêu cầu cấp giấy xác nhận tốt nghiệp. "
+        "Vui lòng không chia sẻ mã này cho người khác.\n\n"
+        "Trân trọng,\n"
+        "Hệ thống xác minh tốt nghiệp"
+    )
+
+    send_email(
+        db=db,
+        to_email=to_email,
+        subject=subject,
+        body=body,
     )

@@ -1,0 +1,88 @@
+# Graduation Verification - full local stack
+name: graduation-verification-system
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: graduation_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "123"
+      MYSQL_DATABASE: graduation_db
+      MYSQL_USER: graduation_backend
+      MYSQL_PASSWORD: "123"
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "graduation_backend", "-p123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - graduation_net
+
+  backend:
+    build:
+      context: ./backend
+    container_name: graduation_backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: mysql+pymysql://graduation_backend:123@mysql:3306/graduation_db
+      FABRIC_TESTNET: /fabric-samples/test-network
+      FABRIC_MSP_ID: Org1MSP
+      FABRIC_CHANNEL: mychannel
+      FABRIC_CHAINCODE: graduation
+      FABRIC_PEER_ENDPOINT: peer0.org1.example.com:7051
+      FABRIC_ORG2_PEER_ENDPOINT: peer0.org2.example.com:9051
+      FABRIC_ORDERER_ENDPOINT: orderer.example.com:7050
+      FABRIC_ORDERER_HOSTNAME: orderer.example.com
+      FABRIC_QUERY_TIMEOUT: "30"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${FABRIC_SAMPLES_PATH:-../go/src/github.com/Notmoney-lab164/fabric-samples}:/fabric-samples:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - graduation_net
+      - fabric_test
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: graduation_frontend
+    restart: unless-stopped
+    environment:
+      VITE_PROXY_TARGET: http://backend:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - graduation_net
+
+volumes:
+  mysql_data:
+    name: graduation-verification-system_mysql_data
+
+networks:
+  graduation_net:
+    name: graduation_net
+    driver: bridge
+  fabric_test:
+    external: true
+    name: fabric_test

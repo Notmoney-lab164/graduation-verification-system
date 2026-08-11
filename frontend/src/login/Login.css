@@ -1,0 +1,140 @@
+.login-shell {
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(135deg, #eef4ff 0%, #f4f7f6 50%, #e9f7f0 100%);
+    padding: 20px;
+  }
+  
+  .login-panel {
+    width: 100%;
+    max-width: 440px;
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 50px 40px;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.08), 0 8px 20px rgba(0, 0, 0, 0.04);
+  }
+  
+  .login-header {
+    text-align: center;
+    margin-bottom: 35px;
+  }
+  
+  .login-header h1 {
+    margin: 0;
+    font-size: 36px;
+    color: #172026;
+  }
+  
+  .login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  
+  .input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .input-group label {
+    font-weight: 700;
+    font-size: 15px;
+    color: #172026;
+  }
+  
+  .input-group input {
+    height: 52px;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    padding: 0 16px;
+    font-size: 16px;
+    text-transform: none; /* Khác với mã SV, username/password giữ nguyên chữ thường */
+    transition: all 0.25s ease;
+  }
+  
+  .input-group input:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
+  }
+  
+  .login-btn {
+    height: 56px;
+    margin-top: 10px;
+    border: none;
+    border-radius: 12px;
+    background: #2563eb;
+    color: white;
+    font-size: 17px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.25s ease;
+  }
+  
+  .login-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    background: #1d4ed8;
+  }
+  
+  .login-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+  
+  .error-message {
+    padding: 14px;
+    background: #fff1f1;
+    border: 1px solid #e5a5a5;
+    border-radius: 10px;
+    color: #991b1b;
+    font-size: 14px;
+    font-weight: 500;
+    text-align: center;
+  }
+  
+  /* --- Bổ sung CSS cho tính năng Con mắt --- */
+  .password-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  
+  /* Đẩy width lên 100% để lấp đầy wrapper và chừa khoảng trống bên phải cho con mắt */
+  .password-wrapper input {
+    width: 100%;
+    padding-right: 50px; 
+  }
+  
+  .toggle-eye-btn {
+    position: absolute;
+    right: 8px;
+    background: transparent;
+    border: none;
+    padding: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    color: #94a3b8; /* Màu xám nhạt cho icon */
+    height: auto;
+  }
+  
+  /* Khử hiệu ứng hover nút mặc định (không bị nảy lên hay đổi màu nền) */
+  .toggle-eye-btn:hover {
+    transform: none;
+    background: transparent;
+    color: #2563eb; /* Rê chuột vào thì icon sáng lên màu xanh */
+  }
+  
+  .eye-icon {
+    width: 22px;
+    height: 22px;
+    transition: color 0.2s ease;
+  }
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
+  }

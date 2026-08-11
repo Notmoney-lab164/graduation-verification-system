@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session
 import models
 import schemas
 from services.encryption_service import decrypt_value, encrypt_value
-from services.hash_service import calculate_student_hash
+from services.hash_service import (
+    METADATA_HASH_VERSION,
+    calculate_student_hash,
+)
 
 
 def normalize_citizen_id(citizen_id: str) -> str:
@@ -67,13 +70,21 @@ def prepare_student_storage_data(student_data: dict) -> dict:
 
 def get_student_private_data(student: models.Student) -> dict:
     return {
-        "citizen_id": decrypt_value(student.citizen_id_encrypted),
-        "citizen_id_issue_date": student.citizen_id_issue_date,
-        "citizen_id_issue_place": decrypt_value(
-            student.citizen_id_issue_place_encrypted
+        "citizen_id": (
+            decrypt_value(student.citizen_id_encrypted)
+            if student.citizen_id_encrypted
+            else None
         ),
-        "permanent_address": decrypt_value(
-            student.permanent_address_encrypted
+        "citizen_id_issue_date": student.citizen_id_issue_date,
+        "citizen_id_issue_place": (
+            decrypt_value(student.citizen_id_issue_place_encrypted)
+            if student.citizen_id_issue_place_encrypted
+            else None
+        ),
+        "permanent_address": (
+            decrypt_value(student.permanent_address_encrypted)
+            if student.permanent_address_encrypted
+            else None
         ),
     }
 
@@ -311,6 +322,29 @@ def get_student(db: Session, student_id: str):
         .first()
     )
 
+
+# MULTI_USER_ROW_LOCK_V1
+def get_student_for_update(db: Session, student_id: str):
+    """Lock one active student until the current transaction finishes."""
+    return (
+        db.query(models.Student)
+        .filter(
+            models.Student.student_id == student_id,
+            models.Student.is_deleted.is_(False),
+        )
+        .with_for_update()
+        .first()
+    )
+
+
+def get_student_including_deleted(db: Session, student_id: str):
+    """Dung khi kiem tra trung khoa, khong dung cho API tra cuu public."""
+    return (
+        db.query(models.Student)
+        .filter(models.Student.student_id == student_id)
+        .first()
+    )
+
 def get_deleted_student(
     db: Session,
     student_id: str,
@@ -343,46 +377,80 @@ def restore_student(
     return student
 
 
-def get_student_by_degree_id(db: Session, degree_id: str | None):
+def get_student_by_degree_id(
+    db: Session,
+    degree_id: str | None,
+    include_deleted: bool = True,
+):
     if not degree_id:
         return None
 
-    return (
-        db.query(models.Student)
-        .filter(
-            models.Student.degree_id == degree_id,
-            models.Student.is_deleted.is_(False),
-        )
-        .first()
+    query = db.query(models.Student).filter(
+        models.Student.degree_id == degree_id
     )
+
+    if not include_deleted:
+        query = query.filter(models.Student.is_deleted.is_(False))
+
+    return query.first()
 
 
 def get_student_by_citizen_id_hash(
     db: Session,
     citizen_id_hash: str | None,
+    include_deleted: bool = True,
 ):
     if not citizen_id_hash:
         return None
 
-    return (
+    query = db.query(models.Student).filter(
+        models.Student.citizen_id_hash == citizen_id_hash
+    )
+
+    if not include_deleted:
+        query = query.filter(models.Student.is_deleted.is_(False))
+
+    return query.first()
+
+
+# EXPLORER_DYNAMIC_CURRENT_HASH_V2
+def get_changed_student_by_metadata_hash(
+    db: Session,
+    metadata_hash: str,
+):
+    """Match a lookup against hashes freshly calculated from changed records."""
+    normalized_hash = str(metadata_hash or "").strip().lower()
+    if not normalized_hash:
+        return None
+
+    candidates = (
         db.query(models.Student)
         .filter(
-            models.Student.citizen_id_hash == citizen_id_hash,
             models.Student.is_deleted.is_(False),
+            models.Student.is_mismatch.is_(True),
+            models.Student.blockchain_tx_id.isnot(None),
         )
-        .first()
+        .all()
     )
+
+    for student in candidates:
+        current_hash = calculate_student_hash(student).lower()
+        if hmac.compare_digest(current_hash, normalized_hash):
+            return student
+
+    return None
 
 
 def list_students(
     db: Session,
     search: str | None = None,
     graduation_status: str | None = None,
+    is_deleted: bool = False,
     page: int = 1,
     page_size: int = 20,
 ):
     query = db.query(models.Student).filter(
-        models.Student.is_deleted.is_(False)
+        models.Student.is_deleted.is_(is_deleted)
     )
 
     if search:
@@ -418,19 +486,31 @@ def list_students(
         "total_pages": total_pages,
     }
 
-
 def create_student(
     db: Session,
     student_data: schemas.StudentCreate,
     updated_by: str | None = "admin",
     commit: bool = True,
 ):
+    existing_student = get_student_including_deleted(
+        db,
+        student_data.student_id,
+    )
+    if existing_student:
+        raise ValueError("STUDENT_ID_ALREADY_EXISTS")
+
     storage_data = prepare_student_storage_data(
         student_data.model_dump()
     )
 
+    if storage_data.get("email"):
+        storage_data["email"] = normalize_requester_email(
+            storage_data["email"]
+        )
+
     student = models.Student(**storage_data)
     student.updated_by = updated_by
+    student.metadata_hash_version = METADATA_HASH_VERSION
     student.metadata_hash = calculate_student_hash(student)
     student.is_mismatch = False
     student.approval_status = "APPROVED"
@@ -458,12 +538,18 @@ def update_student(
         student_data.model_dump(exclude_unset=True)
     )
 
+    if update_data.get("email"):
+        update_data["email"] = normalize_requester_email(
+            update_data["email"]
+        )
+
     for key, value in update_data.items():
         setattr(student, key, value)
 
     student.updated_by = updated_by
 
     if sync_hash:
+        student.metadata_hash_version = METADATA_HASH_VERSION
         student.metadata_hash = calculate_student_hash(student)
 
     if commit:
@@ -649,26 +735,111 @@ def get_stats(db: Session):
     }
 
 
+EXTERNAL_REQUEST_CREATE_FIELDS = {
+    "student_id",
+    "full_name",
+    "gpa",
+    "graduation_status",
+    "requester_name",
+    "requester_email",
+    "requester_type",
+    "message",
+    "source_file_name",
+    "source_row_number",
+    "verification_status",
+    "verification_message",
+    "matched_student_name",
+    "import_data",
+    "status",
+}
+
+
 def create_external_request(
     db: Session,
-    request_data: schemas.ExternalRequestCreate,
+    request_data: schemas.ExternalRequestCreate | dict,
+    commit: bool = True,
 ):
-    external_request = models.ExternalRequest(
-        **request_data.model_dump()
+    raw_payload = (
+        request_data.model_dump()
+        if isinstance(request_data, schemas.ExternalRequestCreate)
+        else dict(request_data)
     )
-    external_request.status = "PENDING_REVIEW"
+
+    payload = {
+        key: value
+        for key, value in raw_payload.items()
+        if key in EXTERNAL_REQUEST_CREATE_FIELDS
+    }
+
+    if payload.get("student_id"):
+        payload["student_id"] = str(payload["student_id"]).strip().upper()
+
+    if payload.get("requester_email"):
+        payload["requester_email"] = normalize_requester_email(
+            payload["requester_email"]
+        )
+
+    payload.setdefault("status", "PENDING_REVIEW")
+    payload.setdefault("verification_status", "PENDING")
+
+    external_request = models.ExternalRequest(**payload)
 
     db.add(external_request)
-    db.commit()
-    db.refresh(external_request)
+
+    if commit:
+        db.commit()
+        db.refresh(external_request)
+    else:
+        db.flush()
 
     return external_request
 
 
-def get_external_request(db: Session, request_id: int):
+def get_external_request(
+    db: Session,
+    request_id: int,
+    include_deleted: bool = False,
+):
+    query = db.query(models.ExternalRequest).filter(
+        models.ExternalRequest.id == request_id
+    )
+
+    if not include_deleted:
+        query = query.filter(
+            models.ExternalRequest.is_deleted.is_(False)
+        )
+
+    return query.first()
+
+
+def get_external_request_for_update(
+    db: Session,
+    request_id: int,
+    include_deleted: bool = False,
+):
+    """Lock one external request until the current transaction finishes."""
+    query = db.query(models.ExternalRequest).filter(
+        models.ExternalRequest.id == request_id
+    )
+
+    if not include_deleted:
+        query = query.filter(
+            models.ExternalRequest.is_deleted.is_(False)
+        )
+
+    return query.with_for_update().first()
+
+
+def get_deleted_external_request(
+    db: Session,
+    request_id: int,
+):
     return (
         db.query(models.ExternalRequest)
-        .filter(models.ExternalRequest.id == request_id)
+        .filter(
+            models.ExternalRequest.id == request_id,
+            models.ExternalRequest.is_deleted.is_(True),
+        )
         .first()
     )
 
@@ -679,8 +850,11 @@ def list_external_requests(
     search: str | None = None,
     page: int = 1,
     page_size: int = 20,
+    is_deleted: bool = False,
 ):
-    query = db.query(models.ExternalRequest)
+    query = db.query(models.ExternalRequest).filter(
+        models.ExternalRequest.is_deleted.is_(is_deleted)
+    )
 
     if status:
         query = query.filter(
@@ -688,13 +862,15 @@ def list_external_requests(
         )
 
     if search:
-        keyword = f"%{search}%"
+        keyword = f"%{search.strip()}%"
         query = query.filter(
             or_(
                 models.ExternalRequest.student_id.like(keyword),
                 models.ExternalRequest.full_name.like(keyword),
                 models.ExternalRequest.requester_name.like(keyword),
                 models.ExternalRequest.requester_email.like(keyword),
+                models.ExternalRequest.source_file_name.like(keyword),
+                models.ExternalRequest.verification_status.like(keyword),
             )
         )
 
@@ -703,7 +879,10 @@ def list_external_requests(
     offset = (page - 1) * page_size
 
     items = (
-        query.order_by(models.ExternalRequest.created_at.desc())
+        query.order_by(
+            models.ExternalRequest.created_at.desc(),
+            models.ExternalRequest.id.desc(),
+        )
         .offset(offset)
         .limit(page_size)
         .all()
@@ -716,6 +895,44 @@ def list_external_requests(
         "page_size": page_size,
         "total_pages": total_pages,
     }
+
+
+def archive_external_request(
+    db: Session,
+    external_request: models.ExternalRequest,
+    deleted_by: str,
+    commit: bool = True,
+):
+    """Luu tru ho so; khong xoa sinh vien hoac du lieu Blockchain."""
+    external_request.is_deleted = True
+    external_request.deleted_at = datetime.utcnow()
+    external_request.deleted_by = deleted_by
+
+    if commit:
+        db.commit()
+        db.refresh(external_request)
+    else:
+        db.flush()
+
+    return external_request
+
+
+def restore_external_request(
+    db: Session,
+    external_request: models.ExternalRequest,
+    commit: bool = True,
+):
+    external_request.is_deleted = False
+    external_request.deleted_at = None
+    external_request.deleted_by = None
+
+    if commit:
+        db.commit()
+        db.refresh(external_request)
+    else:
+        db.flush()
+
+    return external_request
 
 
 def approve_external_request(
@@ -748,7 +965,7 @@ def reject_external_request(
     external_request.status = "REJECTED"
     external_request.reviewed_by = reviewed_by
     external_request.reviewed_at = datetime.utcnow()
-    external_request.reject_reason = reject_reason
+    external_request.reject_reason = reject_reason.strip()
 
     if commit:
         db.commit()
@@ -877,3 +1094,47 @@ def reject_certificate_request(
         db.flush()
 
     return certificate_request
+
+def get_active_email_setting(db: Session):
+    return (
+        db.query(models.EmailSetting)
+        .filter(models.EmailSetting.is_active.is_(True))
+        .order_by(models.EmailSetting.id.desc())
+        .first()
+    )
+
+
+def list_active_admin_emails(db: Session) -> list[str]:
+    rows = (
+        db.query(models.User.email)
+        .filter(
+            models.User.role == "admin",
+            models.User.is_active.is_(True),
+            models.User.email.isnot(None),
+        )
+        .all()
+    )
+
+    return [
+        email
+        for (email,) in rows
+        if email
+    ]
+
+def get_student_by_email(
+    db: Session,
+    email: str,
+    include_deleted: bool = True,
+):
+    if not email:
+        return None
+
+    normalized_email = normalize_requester_email(email)
+    query = db.query(models.Student).filter(
+        func.lower(models.Student.email) == normalized_email
+    )
+
+    if not include_deleted:
+        query = query.filter(models.Student.is_deleted.is_(False))
+
+    return query.first()
